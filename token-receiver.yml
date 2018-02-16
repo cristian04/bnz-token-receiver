@@ -29,11 +29,6 @@ spec:
       - image: extractor-token-receiver:latest
         imagePullPolicy: IfNotPresent
         name: extractor-token-receiver
-        volumeMounts:
-        - mountPath: "/root/.minikube"
-          name: kubernetes-data
-        - mountPath: "/root/.kube"
-          name: kubernetes-data
         resources: {}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
@@ -41,11 +36,7 @@ spec:
       restartPolicy: Always
       schedulerName: default-scheduler
       securityContext: {}
-      terminationGracePeriodSeconds: 30
-      volumes:
-      - configMap:
-          name: k8s
-        name: kubernetes-data
+      terminationGracePeriodSeconds: 5
 status:
   availableReplicas: 1
   conditions:
@@ -82,3 +73,13 @@ spec:
   type: NodePort
 status:
   loadBalancer: {}
+
+---
+apiVersion: v1
+data:
+  token: Q1JJU1RJQU4K
+kind: Secret
+metadata:
+  name: bnz
+  namespace: default
+type: Opaque
