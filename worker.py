@@ -20,14 +20,14 @@ redis_host = os.getenv('MESSAGE_QUEUE_SERVICE_HOST','192.168.99.100')
 redis_port = int(os.getenv('MESSAGE_QUEUE_SERVICE_PORT', 6379))
 mongodb_host = os.getenv('DATABASE_SERVICE_HOST','192.168.99.100')
 mongodb_port = int(os.getenv('DATABASE_SERVICE_PORT', 27017))
-start_date_string = os.getenv('START_DATE','2017-09-16')
+start_date_string = os.getenv('START_DATE','2015-09-16')
 start_date = datetime.strptime(start_date_string,'%Y-%m-%d').date()
 client = MongoClient(mongodb_host,mongodb_port)
 db = client.extractor
 BASE_URL= "https://www.bnz.co.nz"
 ENDPOINT = BASE_URL + "/ib/api/accounts/"
 auth = os.getenv('SECRET_BNZ_TOKEN')
-verify=False
+verify=True
 token_queue = Queue('token-queue',connection=Redis(host=redis_host,port=redis_port))
 transaction_queue = Queue('transaction-queue',connection=Redis(host=redis_host,port=redis_port))
 headers = {'Host':'www.bnz.co.nz',
@@ -54,7 +54,9 @@ def get_accounts():
     get_accounts_response = requests.get(ENDPOINT, headers=headers, verify=verify, allow_redirects=False)
     if get_accounts_response.status_code != 200:
         logging.error("Response is not OK. Maybe your token has expired. Finishing script")
-        exit(0)
+        from time import sleep
+        sleep(5)
+        exit(-1)
     accounts_info = get_accounts_response.json()
     for account in accounts_info['accountList']:
         account_data = {"_id": account['id'], "account_name": account['nickname'], "endpoint": ENDPOINT + account['id']}
@@ -66,7 +68,6 @@ def save_token(token):
 
     # Configs can be set in Configuration class directly or using helper utility
     config.load_kube_config()
-
     api_instance = client.CoreV1Api()
     sec = client.V1Secret()
     sec.metadata = client.V1ObjectMeta(name="bnz")
@@ -87,26 +88,74 @@ def __add_account(account):
 
 def prepare_get_transaction_queue(account): #account
     end_date = str(date.today() - timedelta(1)) # Yesterday
+    transactions = db.transactions
+
+    transactions_list = __get_account_transactions(account, start_date,end_date)
+    logging.info(str(len(transactions_list)) + ' transactions were returned from BNZ')
+    for trans in transactions_list:
+        try:
+            trans['_id'] = trans['transactionIdentifier']
+            transactions.insert_one(trans)
+            logging.info('Added new transaction ' +  trans['_id'] + ' in database')
+        except DuplicateKeyError:
+            logging.error('Transaction ' +  trans['_id'] + ' already in the database. Skipping')
+
+
+def prepare_get_transaction_queue2(account): #account
+    import pdb; pdb.set_trace()
+    end_date = str(date.today() - timedelta(1)) # Yesterday
     accounts = db.accounts
+    transactions = db.transactions
     account_in_database = accounts.find_one(account['_id'])
-    last_transaction_date = account_in_database.get('lastTransactionDate')
-    if last_transaction_date:
-        #compare dates
-        logging.debug('Download from ')
-        logging.info('Account:'+ account['account_name'] +' download from: lastTransactionDate '+ str(last_transaction_date) + ' to: ' + str(end_date))
-        __get_account_transactions(account, last_transaction_date,end_date)
-    else:
-        logging.debug('First Time running this')
-        logging.info('Account:'+ account['account_name'] +' download from: StartDate:  '+ str(start_date) + ' to: ' + str(end_date))
-        __get_account_transactions(account, start_date,end_date)
+    last_transaction_date = account_in_database.get('lastDownloadedDate')
+
+    # if last_transaction_date:
+    #     #compare dates
+    #     logging.debug('Download from ')
+    #     logging.info('Account:'+ account['account_name'] +' download from: lastTransactionDate '+ str(last_transaction_date) + ' to: ' + str(end_date))
+    #     list = __get_account_transactions(account, last_transaction_date,end_date)
+    # else:
+    logging.debug('First Time running this')
+    logging.info('Account:'+ account['account_name'] +' download from: StartDate:  '+ str(start_date) + ' to: ' + str(end_date))
+    list = __get_account_transactions(account, start_date,end_date)
+    for trans in list:
+        try:
+            trans['_id'] = trans['transactionIdentifier']
+            transactions_in_accounts = account_in_database.get('transactions',None)
+            if transactions_in_accounts is None:
+                account_in_database['transactions'] = []
+            account_in_database['transactions'].append(trans['_id'])
+            #  Gets the date from the account and compare with the one from the transaction. If the transaction one is newer, change it
+            # If empty, add the one from the transaction.
+            date_in_account=account_in_database.get('lastDownloadedDate',None)
+            trans_date=trans.get('date',None)
+            if date_in_account is not None:
+                if trans_date > date_in_account: # trans date is sooner
+                    account_in_database['lastDownloadedDate'] = trans_date
+                    logging.info('Date in transaction is newer. Updating lastDownloadedDate field ')
+                    accounts.find_one_and_replace(account,account_in_database)
+                else:
+                    logging.info('Last downloaded date is newer than transaction date')
+                    accounts.find_one_and_replace(account,account_in_database) # Saving just the transaction id into the account
+            else:
+                logging.info('First transaction being saved')
+                account_in_database['lastDownloadedDate'] = trans_date
+                accounts.find_one_and_replace(account, account_in_database)
+            transactions.insert_one(trans)
+            logging.info('Added new transaction' +  trans['_id'] + ' in database')
+
+        except DuplicateKeyError:
+            logging.error('Transaction' +  trans['_id'] + ' already in the database. Skipping')
 
 
 def __get_account_transactions(account, sdate, edate):
-    get_transaction_url = account['endpoint'] + '/transactions?startDate=' + sdate + '&endDate=' + edate
+    get_transaction_url = account['endpoint'] + '/transactions?startDate=' + str(sdate) + '&endDate=' + str(edate)
     transactions_request = requests.get(get_transaction_url, headers=headers, verify=verify)
     if transactions_request.status_code == 200:
         transactions = transactions_request.json().get('transactions',None)
         return transactions
     else:
         logging.error("Response is not OK. Maybe your token has expired. Finishing script")
-        exit(0)
+        from time import sleep
+        sleep(5)
+        exit(-1)
