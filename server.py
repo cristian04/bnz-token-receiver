@@ -26,8 +26,6 @@ def create_token():
     # import pdb; pdb.set_trace()
     token_queue.enqueue(save_token,token)
     token_queue.enqueue(get_accounts)
-    # token_queue.enqueue(get_transaction_until_empty)
-    # token_queue.enqueue(get_transactions)
     return jsonify('Token Received'), 201
 
 if __name__ == '__main__':
