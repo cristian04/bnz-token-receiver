@@ -6,14 +6,14 @@ metadata:
   creationTimestamp: 2017-10-16T04:44:01Z
   generation: 3
   labels:
-    run: token-worker
-  name: token-worker
+    run: transactions-worker
+  name: transactions-worker
   namespace: default
 spec:
   replicas: 1
   selector:
     matchLabels:
-      run: token-worker
+      run: transactions-worker
   strategy:
     rollingUpdate:
       maxSurge: 1
@@ -23,21 +23,19 @@ spec:
     metadata:
       creationTimestamp: null
       labels:
-        run: token-worker
+        run: transactions-worker
     spec:
       containers:
       - image: extractor-token-receiver:latest
         imagePullPolicy: IfNotPresent
         name: extractor-token-receiver
         command:
-          - "/usr/local/bin/rq" # The rq worker command
-#           - "sleep"
+          - "/usr/local/bin/rq"
         args:
           - "worker"
           - "--burst"
           - "-c"
-          - "token-queue-settings" # /usr/local/bin/rq worker --burst -c token-queue-settings
-#           - "3600" # sleep
+          - "transactions-queue-settings"
         env:
         - name: SECRET_BNZ_TOKEN
           valueFrom:
